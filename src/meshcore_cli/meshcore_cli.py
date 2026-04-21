@@ -2244,6 +2244,56 @@ async def next_cmd(mc, cmds, json_output=False):
                         else:
                             print(f"Policy for adv_loc: {policy}")
 
+                    case "wifi_ssid":
+                        # CMD_SET_WIFI_SSID = 44 (0x2c); empty clears (falls back to compile-time default)
+                        ssid = cmds[2] if cmds[2].lower() != "none" else ""
+                        res = await mc.commands.send(
+                            b"\x2c" + ssid.encode("utf-8"),
+                            [EventType.OK, EventType.ERROR],
+                        )
+                        if res.type == EventType.ERROR:
+                            print(f"Error : {res}")
+                        elif json_output:
+                            print(json.dumps({"wifi_ssid": ssid}, indent=4))
+                        else:
+                            print(f"wifi_ssid: {ssid if ssid else '(cleared, using firmware default)'}")
+
+                    case "wifi_pwd" | "wifi_password":
+                        # CMD_SET_WIFI_PASSWORD = 45 (0x2d); empty clears
+                        pwd = cmds[2] if cmds[2].lower() != "none" else ""
+                        res = await mc.commands.send(
+                            b"\x2d" + pwd.encode("utf-8"),
+                            [EventType.OK, EventType.ERROR],
+                        )
+                        if res.type == EventType.ERROR:
+                            print(f"Error : {res}")
+                        elif json_output:
+                            print(json.dumps({"wifi_pwd": "***"}, indent=4))
+                        else:
+                            print("wifi_pwd: " + ("(cleared, using firmware default)" if not pwd else "set"))
+
+                    case "connect_mode":
+                        # CMD_SET_CONNECT_MODE = 47 (0x2f); 0=BLE, 1=TCP
+                        v = cmds[2].lower()
+                        mode = None
+                        if v in ("ble", "0"):
+                            mode = 0
+                        elif v in ("tcp", "wifi", "1"):
+                            mode = 1
+                        else:
+                            print("Error: connect_mode must be 'ble' or 'tcp'")
+                        if mode is not None:
+                            res = await mc.commands.send(
+                                bytes([0x2f, mode]),
+                                [EventType.OK, EventType.ERROR],
+                            )
+                            if res.type == EventType.ERROR:
+                                print(f"Error : {res}")
+                            elif json_output:
+                                print(json.dumps({"connect_mode": "tcp" if mode == 1 else "ble"}, indent=4))
+                            else:
+                                print(f"connect_mode: {'TCP' if mode == 1 else 'BLE'} (reboot to apply)")
+
                     case _: # custom var
                         if cmds[1].startswith("_") :
                             vname = cmds[1][1:]
@@ -3845,6 +3895,10 @@ def get_help_for (cmdname, context="line") :
         (pending contacts list is built by meshcli from adverts while connected)
     autoadd_config              : set autoadd_config flags (see ?autoadd)
     path_hash_mode <value>
+    wifi_ssid <ssid>            : WiFi SSID for TCP mode (use "none" to clear)
+    wifi_pwd <password>         : WiFi password for TCP mode (use "none" to clear)
+                                  (use shell quotes for values with spaces)
+    connect_mode <ble|tcp>      : switch active transport (reboot to apply)
   display:
     print_timestamp <on/off/fmt>: toggle printing of timestamp, can be strftime format
     print_snr <on/off>          : toggle snr display in messages
