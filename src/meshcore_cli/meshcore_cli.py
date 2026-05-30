@@ -627,6 +627,7 @@ def make_completion_dict(contacts, pending={}, to=None, channels=None):
             "stats_packets":None,
             "allowed_repeat_freq":None,
             "path_hash_mode":None,
+            "wifi_ssid":None,
         },
         "?get":None,
         "?set":None,
@@ -2584,6 +2585,39 @@ async def next_cmd(mc, cmds, json_output=False):
                     case "allowed_repeat_freq" :
                         res = await mc.commands.get_allowed_repeat_freq()
                         print(json.dumps(res.payload))
+                    case "wifi_ssid":
+                        # CMD_GET_WIFI_SSID = 46 (0x2e) -> RESP_CODE_WIFI_SSID = 29 (0x1d)
+                        # The upstream meshcore lib doesn't know code 29, so it never
+                        # dispatches an event for it. Temporarily intercept the reader's
+                        # frame handler to capture the raw response, then restore it.
+                        loop = asyncio.get_running_loop()
+                        fut = loop.create_future()
+                        orig_handle_rx = mc._reader.handle_rx
+
+                        async def _capture_wifi_ssid(data, _orig=orig_handle_rx, _fut=fut):
+                            if len(data) >= 1 and data[0] == 0x1d:  # RESP_CODE_WIFI_SSID
+                                if not _fut.done():
+                                    _fut.set_result(bytes(data[1:]).decode("utf-8", "ignore"))
+                                return
+                            return await _orig(data)
+
+                        mc._reader.handle_rx = _capture_wifi_ssid
+                        try:
+                            await mc.commands.send(b"\x2e")  # fire-and-forget
+                            ssid = await asyncio.wait_for(fut, timeout=5)
+                        except asyncio.TimeoutError:
+                            ssid = None
+                        finally:
+                            mc._reader.handle_rx = orig_handle_rx
+                        if ssid is None:
+                            if json_output:
+                                print(json.dumps({"error": "timeout", "var": "wifi_ssid"}))
+                            else:
+                                print("Error: no response from device (timeout)")
+                        elif json_output:
+                            print(json.dumps({"wifi_ssid": ssid}, indent=4))
+                        else:
+                            print(f"wifi_ssid: {ssid if ssid else '(empty, using firmware default)'}")
                     case _ :
                         res = await mc.commands.get_custom_vars()
                         logger.debug(res)
@@ -3870,6 +3904,7 @@ def get_help_for (cmdname, context="line") :
     stats_packets      : packets stats (recv/sent/flood/direct)
     allowed_repeat_freq: possible frequency ranges for repeater mode
     path_hash_mode
+    wifi_ssid          : SSID currently stored on the device (empty = firmware default)
 """)
 
     elif cmdname == "set" :
